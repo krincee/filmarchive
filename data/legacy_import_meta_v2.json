@@ -1,0 +1,8 @@
+{
+  "raw_cells": 360,
+  "initial_movie_records": 334,
+  "expanded_movie_records": 340,
+  "bootstrap_unique_records": 339,
+  "tv_records_deferred": 18,
+  "note": "Old ad-hoc categories are migration provenance only; grouped movie cells are expanded; exact TMDB ID dedupe happens during live migration."
+}
