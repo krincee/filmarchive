@@ -16,3 +16,6 @@
 5. Hard refresh once.
 
 Existing Sheet data, TMDB token, WRITE_TOKEN, and /exec URL remain unchanged.
+
+
+App icon included: assets/icons/app-icon-192.png, app-icon-512.png, app-icon-180.png, app-icon-32.png, app-icon-16.png
