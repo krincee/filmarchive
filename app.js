@@ -189,10 +189,15 @@
     const exact=state.films.filter(f=>f.datePrecision==='exact'&&f.watchedDate).sort((a,b)=>String(b.watchedDate).localeCompare(String(a.watchedDate)));
     const recent=exact.length?exact.slice(0,14):homepageMix(state.films,14);
     const recentLabel=exact.length?'最近觀看':'片庫一覽';
-    const memoryPool=state.films.filter(f=>Number(f.year)>=1980&&Number(f.year)<=1989&&String(f.region||'').includes('香港')&&(f.backdropPath||f.posterPath));
+    const isHongKongFilm=f=>{
+      const region=String(f.region||'').toLowerCase();
+      return region.includes('香港')||region.includes('hong kong')||/(^|[／|,\s])hk($|[／|,\s])/.test(region);
+    };
+    let memoryPool=state.films.filter(f=>Number(f.year)>=1980&&Number(f.year)<=1989&&isHongKongFilm(f)&&(f.backdropPath||f.posterPath));
+    // Older imported records may not have a normalized region yet. Keep the card visual instead of falling back to a dead block.
+    if(!memoryPool.length) memoryPool=state.films.filter(f=>Number(f.year)>=1980&&Number(f.year)<=1989&&(f.backdropPath||f.posterPath));
     const memoryFilm=chooseRotatingFilm(memoryPool,'krince-memory-hk80-history',10);
     const memoryImage=memoryFilm?(backdropImg(memoryFilm)||posterImg(memoryFilm,'w780')):'';
-    const memoryStyle=memoryImage?`--memory-bg:url('${memoryImage}') center/cover`:`--memory-bg:${memoryFilm?posterBg(memoryFilm):'linear-gradient(145deg,#817263,#382b27)'}`;
     const needs=state.films.filter(f=>f.needsEnrichment).length;
     const progress=state.migrationProgress&&state.migrationRunning?`已處理 ${state.migrationProgress.done}/${state.migrationProgress.total||'…'} 部${state.migrationProgress.failed?` · ${state.migrationProgress.failed} 部稍後重試`:''}。`:'';
     const legacyDone=state.migrationStatus&&Number(state.migrationStatus.total||0)>=339;
@@ -205,7 +210,7 @@
       <div class="hero" style="--hero-bg:${heroStyle}"><div class="hero-art"></div><div class="hero-grain"></div><div class="hero-film-tag">本次封面 · ${esc(hero.titleZh)}</div><div class="hero-copy"><div class="eyebrow">KRINCE'S FILM ARCHIVE · EST. 2021</div><h1 class="display-title">我的電影檔案</h1><div class="hero-count"><strong>${state.films.length}</strong><span>部電影</span></div></div></div>
       ${syncCard}${reviewCard}
       <section class="section"><div class="section-head"><h2 class="section-title">${recentLabel}</h2><button class="section-link" data-nav="library">查看全部 ›</button></div><div class="horizontal-posters">${recent.map(f=>posterCard(f,{small:true})).join('')}</div></section>
-      <section class="section"><div class="section-head"><h2 class="section-title">繼續整理你的電影記憶</h2></div><div class="memory-card" data-discover-preset="hk80"><div class="memory-art" style="${memoryStyle}" ${memoryFilm?`aria-label="${esc(memoryFilm.titleZh)}"`:''}>${memoryFilm?`<span class="memory-film-caption">${esc(memoryFilm.titleZh)}</span>`:''}</div><div><div class="eyebrow">CONTINUE DISCOVERING</div><div class="memory-title">80年代香港電影</div><div class="memory-stat">由你記得的開始，再慢慢補回去。</div><div class="inline-arrow">繼續探索 →</div></div></div></section>
+      <section class="section"><div class="section-head"><h2 class="section-title">繼續整理你的電影記憶</h2></div><div class="memory-card" data-discover-preset="hk80"><div class="memory-art" ${memoryFilm?`aria-label="${esc(memoryFilm.titleZh)}"`:''}>${memoryImage?`<img class="memory-art-img" src="${memoryImage}" alt="" loading="lazy" decoding="async" onerror="this.remove()">`:''}${memoryFilm?`<span class="memory-film-caption">${esc(memoryFilm.titleZh)}</span>`:''}</div><div><div class="eyebrow">CONTINUE DISCOVERING</div><div class="memory-title">80年代香港電影</div><div class="memory-stat">由你記得的開始，再慢慢補回去。</div><div class="inline-arrow">繼續探索 →</div></div></div></section>
       <section class="section"><div class="section-head"><h2 class="section-title">你的電影人生</h2><button class="section-link" data-nav="stats">查看完整統計 ›</button></div><div class="year-summary"><div><strong>${state.films.length}</strong><p>片庫會隨住你繼續觀看同補回舊記憶而增長。</p></div><div class="muted" style="font-size:12px;text-align:right">TMDB 資料<br>你的私人紀錄</div></div></section>
     </section>`,'home');
   }

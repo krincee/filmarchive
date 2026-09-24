@@ -28,3 +28,6 @@ No need to run `setupDatabase()` again. Existing TMDB token, WRITE_TOKEN, Sheet 
 - Homepage poster rail shows up to 14 films instead of a fixed six; when exact watch dates are unavailable it rotates through a broader library mix.
 - 1980s Hong Kong memory card now uses a real matching film backdrop/poster with a safe text overlay instead of a static gradient placeholder.
 - Backend remains V4.2; no Apps Script update is required for this front-end-only release.
+
+
+V4.3.1: Fixed the homepage memory-card image. Recognizes 香港 / Hong Kong / HK and renders a real img element instead of a CSS-only background. Front-end only; Apps Script V4.2 stays unchanged.
