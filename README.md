@@ -1,21 +1,30 @@
-# Krince Film Archive V4.1 — Auto-save + Review Fix
+# Krince Film Archive V4.2 — Performance
+
+V4.2 focuses only on speed and responsiveness.
 
 ## What changed
-- Explore / 搜尋新增電影會即時寫入 Google Sheet，不再需要重新跑 339 部舊片單 migration。
-- TMDB 電影新增只傳 `tmdbId + 觀看紀錄`；完整 metadata 由 Apps Script server-side 拉取，避免 JSONP URL 太長而失敗。
-- 新增 persistent pending queue：網絡失敗或離開頁面，未完成寫入會保留在 browser，下次開 App 自動續傳。
-- 首頁會顯示待上傳數量；舊片單已搬遷後，「同步舊片單」降級成維護功能。
-- 待確認配對：候選並行載入、兼容舊候選格式、確認按鈕有 loading 狀態，成功後會重新載入片庫與 Review Queue。
-- `app.js / styles.css / config.js` 加 `?v=4.1` cache-busting，減少 GitHub Pages/Chrome 食舊檔案。
+- Instant first paint from the browser's last saved library; Google Sheet refresh now runs in the background.
+- Google Sheet `library` response is cached server-side for 5 minutes and invalidated immediately after writes.
+- Review count is bundled into the library response, removing one startup request.
+- Library renders 60 posters at a time and auto-loads more near the bottom instead of building hundreds of cards at once.
+- Library search is debounced, reducing full-grid redraws while typing.
+- Normal add/edit autosave no longer reloads the entire database after each write.
+- TMDB search, person, detail and discover results are cached in Apps Script.
+- Existing app icon/PWA files are preserved.
 
 ## Upgrade
-1. Apps Script: replace Code.gs with V4.1, Save.
-2. Deploy → Manage deployments → Edit → New version → Deploy.
-3. Check `/exec?action=health` shows `Krince Film Archive V4.1`.
-4. Replace GitHub repo root files with this build and wait for Pages deployment.
-5. Hard refresh once.
+1. Replace Apps Script with `apps-script/Code.gs`.
+2. Save → Deploy → Manage deployments → Edit → New version → Deploy.
+3. Confirm `/exec?action=health` says `Krince Film Archive V4.2`.
+4. Upload the contents of this folder to the GitHub repo root.
+5. Wait for GitHub Pages deployment, then hard refresh once.
 
-Existing Sheet data, TMDB token, WRITE_TOKEN, and /exec URL remain unchanged.
+No need to run `setupDatabase()` again. Existing TMDB token, WRITE_TOKEN, Sheet data, and `/exec` URL stay the same.
 
 
-App icon included: assets/icons/app-icon-192.png, app-icon-512.png, app-icon-180.png, app-icon-32.png, app-icon-16.png
+## V4.3 Homepage polish
+- Homepage hero now rotates across the full image-ready library, with favourites lightly weighted rather than hard-limiting the pool.
+- Recent hero history avoids repeating the same covers across new tabs/sessions.
+- Homepage poster rail shows up to 14 films instead of a fixed six; when exact watch dates are unavailable it rotates through a broader library mix.
+- 1980s Hong Kong memory card now uses a real matching film backdrop/poster with a safe text overlay instead of a static gradient placeholder.
+- Backend remains V4.2; no Apps Script update is required for this front-end-only release.

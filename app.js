@@ -1,5 +1,5 @@
 (() => {
-  console.info('Krince Film Archive V4.1 Auto-save');
+  console.info('Krince Film Archive V4.2 Performance');
   const CFG = window.APP_CONFIG || {};
   let API = CFG.APPS_SCRIPT_URL || localStorage.getItem('krince-api-url') || '';
   const IS_CHATGPT_PREVIEW = /(?:^|\.)oaiusercontent\.com$/i.test(location.hostname);
@@ -65,7 +65,10 @@
     migrationProgress:null,
     migrationStatus:null,
     pendingFlushing:false,
-    pendingCount:0
+    pendingCount:0,
+    libraryVisibleLimit:60,
+    backgroundSyncing:false,
+    lastLibrarySyncAt:Number(localStorage.getItem('krince-last-library-sync')||0)
   };
 
   function loadLocalFilms(){
@@ -141,7 +144,7 @@
     return `<article class="poster-card ${selected?'selected':''}" data-film-id="${esc(f.id)}" ${selectable?'data-selectable="1"':''}>
       <div class="poster" style="--poster-bg:${posterBg(f)}">
         <div class="poster-placeholder"><small>${f.needsEnrichment?'待補資料':'FILM ARCHIVE'}</small><span>${esc(f.titleZh)}</span><em>${esc(f.year||'年份不詳')}</em></div>
-        ${img?`<img src="${img}" alt="${esc(f.titleZh)} 海報" loading="lazy" onerror="this.remove()"/>`:''}
+        ${img?`<img src="${img}" alt="${esc(f.titleZh)} 海報" loading="lazy" decoding="async" onerror="this.remove()"/>`:''}
         ${selectable?`<div class="select-mark">${selected?'✓':f.inLibrary?'✓':'○'}</div>`:badge?`<div class="poster-badge">${badge}</div>`:''}
       </div>
       <div class="poster-title">${esc(f.titleZh)}</div>
@@ -149,19 +152,47 @@
     </article>`;
   }
 
+  function safeJsonArray(key){try{const v=JSON.parse(localStorage.getItem(key)||'[]');return Array.isArray(v)?v:[];}catch(_){return [];}}
+  function rememberRotation(key,id,max=12){if(!id)return;const next=[String(id),...safeJsonArray(key).filter(x=>String(x)!==String(id))].slice(0,max);localStorage.setItem(key,JSON.stringify(next));}
+  function chooseRotatingFilm(pool,historyKey,historySize=12){
+    if(!pool.length)return null;
+    const history=new Set(safeJsonArray(historyKey).map(String));
+    let candidates=pool.filter(f=>!history.has(String(f.id)));
+    if(!candidates.length)candidates=[...pool];
+    const film=candidates[Math.floor(Math.random()*candidates.length)]||pool[0];
+    rememberRotation(historyKey,film?.id,historySize);
+    return film;
+  }
+  function homepageMix(films,count=14){
+    const withImages=films.filter(f=>f.posterPath||f.backdropPath);
+    const source=(withImages.length>=count?withImages:films).filter(Boolean);
+    const history=new Set(safeJsonArray('krince-home-poster-history').map(String));
+    const fresh=source.filter(f=>!history.has(String(f.id)));
+    const base=fresh.length>=count?fresh:[...fresh,...source.filter(f=>history.has(String(f.id)))];
+    const shuffled=[...base].sort(()=>Math.random()-.5).slice(0,count);
+    shuffled.forEach(f=>rememberRotation('krince-home-poster-history',f.id,36));
+    return shuffled;
+  }
+
   function renderHome(){
     const favNeedles=['玻璃之城','perfume','amadeus','prestige','home alone','哈利波特','wreck-it ralph','奇謀妙計'];
-    let heroPool=state.films.filter(f=>favNeedles.some(n=>`${f.titleZh||''} ${f.titleEn||''}`.toLowerCase().includes(n.toLowerCase())) && (f.backdropPath||f.posterPath));
-    if(!heroPool.length) heroPool=state.films.filter(f=>f.backdropPath||f.posterPath);
+    const imagePool=state.films.filter(f=>f.backdropPath||f.posterPath);
+    const favPool=imagePool.filter(f=>favNeedles.some(n=>`${f.titleZh||''} ${f.titleEn||''}`.toLowerCase().includes(n.toLowerCase())));
+    // Keep favourites present without limiting the cover to the same handful forever.
+    const heroPool=[...imagePool,...favPool];
     let hero=null;
-    const savedHero=sessionStorage.getItem('krince-hero-film');
+    const savedHero=sessionStorage.getItem('krince-hero-film-v43');
     if(savedHero) hero=heroPool.find(f=>String(f.id)===savedHero);
-    if(!hero){hero=heroPool[Math.floor(Math.random()*Math.max(heroPool.length,1))]||state.films[0]||demoFilms[0]; if(hero?.id)sessionStorage.setItem('krince-hero-film',String(hero.id));}
+    if(!hero){hero=chooseRotatingFilm(heroPool,'krince-hero-history',14)||state.films[0]||demoFilms[0]; if(hero?.id)sessionStorage.setItem('krince-hero-film-v43',String(hero.id));}
     const heroImage=backdropImg(hero)||posterImg(hero,'w780');
     const heroStyle=heroImage?`url('${heroImage}') center 28%/cover,${posterBg(hero)}`:posterBg(hero);
     const exact=state.films.filter(f=>f.datePrecision==='exact'&&f.watchedDate).sort((a,b)=>String(b.watchedDate).localeCompare(String(a.watchedDate)));
-    const recent=(exact.length?exact:sortLibraryFilms([...state.films])).slice(0,6);
+    const recent=exact.length?exact.slice(0,14):homepageMix(state.films,14);
     const recentLabel=exact.length?'最近觀看':'片庫一覽';
+    const memoryPool=state.films.filter(f=>Number(f.year)>=1980&&Number(f.year)<=1989&&String(f.region||'').includes('香港')&&(f.backdropPath||f.posterPath));
+    const memoryFilm=chooseRotatingFilm(memoryPool,'krince-memory-hk80-history',10);
+    const memoryImage=memoryFilm?(backdropImg(memoryFilm)||posterImg(memoryFilm,'w780')):'';
+    const memoryStyle=memoryImage?`--memory-bg:url('${memoryImage}') center/cover`:`--memory-bg:${memoryFilm?posterBg(memoryFilm):'linear-gradient(145deg,#817263,#382b27)'}`;
     const needs=state.films.filter(f=>f.needsEnrichment).length;
     const progress=state.migrationProgress&&state.migrationRunning?`已處理 ${state.migrationProgress.done}/${state.migrationProgress.total||'…'} 部${state.migrationProgress.failed?` · ${state.migrationProgress.failed} 部稍後重試`:''}。`:'';
     const legacyDone=state.migrationStatus&&Number(state.migrationStatus.total||0)>=339;
@@ -174,7 +205,7 @@
       <div class="hero" style="--hero-bg:${heroStyle}"><div class="hero-art"></div><div class="hero-grain"></div><div class="hero-film-tag">本次封面 · ${esc(hero.titleZh)}</div><div class="hero-copy"><div class="eyebrow">KRINCE'S FILM ARCHIVE · EST. 2021</div><h1 class="display-title">我的電影檔案</h1><div class="hero-count"><strong>${state.films.length}</strong><span>部電影</span></div></div></div>
       ${syncCard}${reviewCard}
       <section class="section"><div class="section-head"><h2 class="section-title">${recentLabel}</h2><button class="section-link" data-nav="library">查看全部 ›</button></div><div class="horizontal-posters">${recent.map(f=>posterCard(f,{small:true})).join('')}</div></section>
-      <section class="section"><div class="section-head"><h2 class="section-title">繼續整理你的電影記憶</h2></div><div class="memory-card" data-discover-preset="hk80"><div class="memory-art"></div><div><div class="eyebrow">CONTINUE DISCOVERING</div><div class="memory-title">80年代香港電影</div><div class="memory-stat">由你記得的開始，再慢慢補回去。</div><div class="inline-arrow">繼續探索 →</div></div></div></section>
+      <section class="section"><div class="section-head"><h2 class="section-title">繼續整理你的電影記憶</h2></div><div class="memory-card" data-discover-preset="hk80"><div class="memory-art" style="${memoryStyle}" ${memoryFilm?`aria-label="${esc(memoryFilm.titleZh)}"`:''}>${memoryFilm?`<span class="memory-film-caption">${esc(memoryFilm.titleZh)}</span>`:''}</div><div><div class="eyebrow">CONTINUE DISCOVERING</div><div class="memory-title">80年代香港電影</div><div class="memory-stat">由你記得的開始，再慢慢補回去。</div><div class="inline-arrow">繼續探索 →</div></div></div></section>
       <section class="section"><div class="section-head"><h2 class="section-title">你的電影人生</h2><button class="section-link" data-nav="stats">查看完整統計 ›</button></div><div class="year-summary"><div><strong>${state.films.length}</strong><p>片庫會隨住你繼續觀看同補回舊記憶而增長。</p></div><div class="muted" style="font-size:12px;text-align:right">TMDB 資料<br>你的私人紀錄</div></div></section>
     </section>`,'home');
   }
@@ -260,11 +291,14 @@
     return sortLibraryFilms(films);
   }
   function hasFacetFilters(){return Object.values(state.libraryFacets||{}).some(Boolean);}
+  function resetLibraryWindow(){state.libraryVisibleLimit=60;}
   function renderLibrary(){
-    const films=filteredLibrary();
+    const allFilms=filteredLibrary();
+    const films=allFilms.slice(0,state.libraryVisibleLimit);
     const ff=state.libraryFacets||{};
+    const more=allFilms.length>films.length;
     return chrome(`<section class="page">
-      <div class="page-title-row"><div><h1 class="page-title">片庫</h1><div class="page-count">${films.length===state.films.length?`${state.films.length} 部電影`:`顯示 ${films.length} / ${state.films.length} 部`}</div></div><button class="icon-btn" aria-label="清除篩選" data-clear-facets ${!hasFacetFilters()?'disabled':''}>${icons.tune}</button></div>
+      <div class="page-title-row"><div><h1 class="page-title">片庫</h1><div class="page-count">${allFilms.length===state.films.length?`${state.films.length} 部電影`:`顯示 ${allFilms.length} / ${state.films.length} 部`}</div></div><button class="icon-btn" aria-label="清除篩選" data-clear-facets ${!hasFacetFilters()?'disabled':''}>${icons.tune}</button></div>
       <div class="searchbox">${icons.search}<input id="library-search" placeholder="搜尋電影、導演、演員……" value="${esc(state.libraryQuery)}"/></div>
       <div class="chips"><button class="chip ${state.libraryFilter==='all'?'active':''}" data-filter="all">全部</button><button class="chip ${state.libraryFilter==='complete'?'active':''}" data-filter="complete">完整睇過</button><button class="chip ${state.libraryFilter==='partial'?'active':''}" data-filter="partial">睇過少少</button><button class="chip ${state.libraryFilter==='rewatch'?'active':''}" data-filter="rewatch">重新觀看</button></div>
       <div class="filter-row">
@@ -272,7 +306,7 @@
         ${['year','region','genre','director','cast','platform','rating'].map(k=>`<button class="filter-btn ${ff[k]?'active':''}" data-open-library-filter="${k}">${esc(facetLabel(k,ff[k]))}</button>`).join('')}
         ${hasFacetFilters()?`<button class="filter-clear-inline" data-clear-facets>清除</button>`:''}
       </div>
-      ${films.length?`<div class="library-grid">${films.map(f=>posterCard(f)).join('')}</div>`:`<div class="empty">片庫入面暫時搵唔到符合條件嘅電影。<br><button class="text-link" data-clear-facets>清除篩選</button></div>`}
+      ${films.length?`<div class="library-grid">${films.map(f=>posterCard(f)).join('')}</div>${more?`<div id="library-more-sentinel" class="library-more-sentinel"><button class="load-more-btn library-more-btn" data-library-more>再顯示 ${Math.min(60,allFilms.length-films.length)} 部</button></div>`:''}`:`<div class="empty">片庫入面暫時搵唔到符合條件嘅電影。<br><button class="text-link" data-clear-facets>清除篩選</button></div>`}
     </section>`,'library');
   }
 
@@ -398,11 +432,17 @@
       state.discoverSelected.has(id)?state.discoverSelected.delete(id):state.discoverSelected.add(id); render();
     });
     $('[data-bulk-add]')?.addEventListener('click',()=>openBulkModal());
-    $$('[data-filter]').forEach(el=>el.onclick=()=>{state.libraryFilter=el.dataset.filter;render();});
+    $$('[data-filter]').forEach(el=>el.onclick=()=>{state.libraryFilter=el.dataset.filter;resetLibraryWindow();render();});
     $$('[data-open-library-filter]').forEach(el=>el.onclick=()=>openLibraryFilterModal(el.dataset.openLibraryFilter));
     $('[data-open-library-sort]')?.addEventListener('click',openLibrarySortModal);
-    $$('[data-clear-facets]').forEach(el=>el.onclick=()=>{state.libraryFacets={year:'',region:'',genre:'',director:'',cast:'',platform:'',rating:''};render();});
-    $('#library-search')?.addEventListener('input',e=>{state.libraryQuery=e.target.value; const pos=e.target.selectionStart; render(); setTimeout(()=>{$('#library-search')?.focus();$('#library-search')?.setSelectionRange(pos,pos)},0);});
+    $$('[data-clear-facets]').forEach(el=>el.onclick=()=>{state.libraryFacets={year:'',region:'',genre:'',director:'',cast:'',platform:'',rating:''};resetLibraryWindow();render();});
+    $('#library-search')?.addEventListener('input',e=>{const value=e.target.value;state.libraryQuery=value;clearTimeout(window.__krinceLibrarySearchTimer);window.__krinceLibrarySearchTimer=setTimeout(()=>{resetLibraryWindow();render();const input=$('#library-search');if(input){input.focus();input.setSelectionRange(value.length,value.length);}},140);});
+    $('[data-library-more]')?.addEventListener('click',()=>{state.libraryVisibleLimit+=60;render();});
+    const libSentinel=$('#library-more-sentinel');
+    if(libSentinel&&'IntersectionObserver' in window){
+      const observer=new IntersectionObserver(entries=>{if(entries.some(x=>x.isIntersecting)){observer.disconnect();state.libraryVisibleLimit+=60;render();}},{rootMargin:'500px 0px'});
+      observer.observe(libSentinel);
+    }
     let searchTimer; $('#add-search')?.addEventListener('input',e=>{clearTimeout(searchTimer); const q=e.target.value.trim(); if(q.length<2){state.searchResults=[];return;} searchTimer=setTimeout(()=>searchMovies(q),350);});
     $$('[data-quick-add]').forEach(el=>el.onclick=()=>openRecordModal(filmById(el.dataset.quickAdd)));
     $('[data-manual-add]')?.addEventListener('click',()=>openManualModal());
@@ -450,7 +490,7 @@
     $$('[data-sort-value]').forEach(el=>el.onclick=()=>{
       state.librarySort=el.dataset.sortValue;
       localStorage.setItem('krince-library-sort',state.librarySort);
-      closeModal();render();
+      resetLibraryWindow();closeModal();render();
     });
   }
 
@@ -464,7 +504,7 @@
         <button class="facet-option ${!current?'active':''}" data-facet-value=""><span>全部</span>${!current?'✓':''}</button>
         ${values.map(v=>`<button class="facet-option ${String(current)===String(v)?'active':''}" data-facet-value="${esc(v)}"><span>${key==='rating'?`${esc(v)} ★`:esc(v)}</span>${String(current)===String(v)?'✓':''}</button>`).join('')}
       </div>`);
-    const bindOptions=()=>$$('[data-facet-value]').forEach(el=>el.onclick=()=>{state.libraryFacets[key]=el.dataset.facetValue;closeModal();render();});
+    const bindOptions=()=>$$('[data-facet-value]').forEach(el=>el.onclick=()=>{state.libraryFacets[key]=el.dataset.facetValue;resetLibraryWindow();closeModal();render();});
     bindOptions();
     $('#facet-search')?.addEventListener('input',e=>{
       const q=e.target.value.trim().toLowerCase();
@@ -646,7 +686,7 @@
       if(!token){toast('請輸入個人同步碼');input.focus();return;}
       localStorage.setItem('krince-write-token',token);
       closeModal();
-      if(mode==='pending')flushPendingWrites({notify:true,refresh:true}); else runLegacyMigration();
+      if(mode==='pending')flushPendingWrites({notify:true,refresh:false}); else runLegacyMigration();
     };
     $('#save-sync-token').onclick=submit;
     input.addEventListener('keydown',e=>{if(e.key==='Enter')submit();});
@@ -682,7 +722,7 @@
         enqueuePendingWrite(op,payload);
       }
       closeModal();state.page='library';render();toast(editing?'已更新紀錄；正在自動儲存':'已加入片庫；正在自動儲存');
-      if(API) flushPendingWrites({notify:true,refresh:true});
+      if(API) flushPendingWrites({notify:true,refresh:false});
     };
   }
   function openDeleteFilmModal(f){
@@ -736,7 +776,7 @@
       const add=picked.filter(f=>!state.films.some(x=>(f.tmdbId&&x.tmdbId===f.tmdbId)||(!f.tmdbId&&x.titleZh===f.titleZh&&x.year===f.year))).map(f=>({...f,status:'complete',datePrecision:'range',watchedFrom:String(Math.max(2021,Number(f.year)||2021)),watchedTo:'2026'}));
       add.forEach(f=>{state.films.unshift(f);if(API&&f.tmdbId)enqueuePendingWrite('addTmdbFilm',{tmdbId:f.tmdbId,watch:minimalWatch(f)});else if(API)enqueuePendingWrite('addFilm',{film:f});});
       persist();state.discoverSelected.clear();closeModal();render();toast(`已加入 ${add.length} 部電影；正在自動儲存`);
-      if(API&&add.length)flushPendingWrites({notify:true,refresh:true});
+      if(API&&add.length)flushPendingWrites({notify:true,refresh:false});
     };
   }
 
@@ -792,7 +832,10 @@
       const bootstrap=await fetchBootstrapFilms();
       const live=Array.isArray(lib.films)?lib.films.map(mapApiFilmFromSheet):[];
       const localPending=state.films.filter(isPendingLocalFilm);
-      state.films=mergeLiveAndLegacy([...localPending,...live],bootstrap,lib.migratedLegacyIds||[]);persist();render();
+      state.films=mergeLiveAndLegacy([...localPending,...live],bootstrap,lib.migratedLegacyIds||[]);
+      if(lib.migrationSummary){state.migrationStatus=lib.migrationSummary;state.reviewCount=Number(lib.migrationSummary.review||0)+Number(lib.migrationSummary.error||0);}
+      state.lastLibrarySyncAt=Date.now();localStorage.setItem('krince-last-library-sync',String(state.lastLibrarySyncAt));
+      persist();render();
     }catch(e){console.warn('Live library refresh skipped',e);}
   }
   async function postMigrationRecordWithRetry(record,maxAttempts=3){
@@ -838,27 +881,43 @@
     finally{state.migrationRunning=false;render();}
   }
 
-  // Load Google Sheet first when connected; otherwise show the user's real 2021–2026 legacy library locally.
+  // V4.2: paint local cache immediately; refresh Google Sheet quietly in the background.
   async function hydrate(){
-    const bootstrap=await fetchBootstrapFilms();
-    // Replace stale V1/demo cache with the real legacy bootstrap on first V2.2 load.
-    const staleCache = state.films.length && (state.films.length < 100 || state.films.every(f=>String(f.id||'').startsWith('demo-')));
-    if(staleCache && bootstrap.length){ state.films=bootstrap; persist(); }
+    state.pendingCount=loadPendingWrites().length;
+    state.backgroundSyncing=!!API;
+    render();
+
+    const bootstrapPromise=fetchBootstrapFilms();
+    let bootstrap=[];
+    try{bootstrap=await bootstrapPromise;}catch(_){bootstrap=[];}
+    const staleCache=state.films.length && (state.films.length < 100 || state.films.every(f=>String(f.id||'').startsWith('demo-')));
+    if((!state.films.length||staleCache)&&bootstrap.length){state.films=bootstrap;persist();render();}
+
     if(API){
       try{
         const data=await apiGet('library');
         const live=Array.isArray(data.films)?data.films.map(mapApiFilmFromSheet):[];
         const pendingIds=pendingTmdbIds();
         const localPending=state.films.filter(f=>f.tmdbId&&pendingIds.has(Number(f.tmdbId)));
-        state.films=mergeLiveAndLegacy([...localPending,...live],bootstrap,data.migratedLegacyIds||[]);persist();
-      }catch(e){console.warn('Using local fallback',e);if(bootstrap.length && (!state.films.length || staleCache)){state.films=bootstrap;persist();}}
+        state.films=mergeLiveAndLegacy([...localPending,...live],bootstrap,data.migratedLegacyIds||[]);
+        if(data.migrationSummary){state.migrationStatus=data.migrationSummary;state.reviewCount=Number(data.migrationSummary.review||0)+Number(data.migrationSummary.error||0);}
+        else await refreshReviewCount();
+        state.lastLibrarySyncAt=Date.now();localStorage.setItem('krince-last-library-sync',String(state.lastLibrarySyncAt));
+        persist();
+      }catch(e){
+        console.warn('Background library refresh skipped',e);
+        if(bootstrap.length&&(!state.films.length||staleCache)){state.films=bootstrap;persist();}
+      }
     } else if((!state.films.length||staleCache)&&bootstrap.length){state.films=bootstrap;persist();}
-    await refreshReviewCount();
+
+    state.backgroundSyncing=false;
     state.pendingCount=loadPendingWrites().length;
     render();
-    if(API&&state.pendingCount&&localStorage.getItem('krince-write-token'))setTimeout(()=>flushPendingWrites({notify:false,refresh:true}),250);
+    if(API&&state.pendingCount&&localStorage.getItem('krince-write-token'))setTimeout(()=>flushPendingWrites({notify:false,refresh:false}),250);
   }
   function mapApiFilmFromSheet(x){return {...x,id:x.id||x.internalId||`tmdb-${x.tmdbId}`,titleZh:x.titleZh||x.title_zh_hk||x.title,titleEn:x.titleEn||x.title_en||'',posterPath:x.posterPath||x.poster_path||'',backdropPath:x.backdropPath||x.backdrop_path||'',genres:Array.isArray(x.genres)?x.genres:String(x.genres||'').split('|').filter(Boolean),cast:Array.isArray(x.cast)?x.cast:String(x.cast||'').split('|').filter(Boolean),rating:(x.rating===''||x.rating==null)?null:Number(x.rating),tmdbVoteAverage:(x.tmdbVoteAverage===''||x.tmdbVoteAverage==null)?null:Number(x.tmdbVoteAverage),tmdbVoteCount:(x.tmdbVoteCount===''||x.tmdbVoteCount==null)?null:Number(x.tmdbVoteCount),createdAt:x.createdAt||x.created_at||'',updatedAt:x.updatedAt||x.updated_at||'',needsEnrichment:false,tone:['#6b5348','#25201e']};}
 
+  // Instant first paint from localStorage; network refresh continues in hydrate().
+  render();
   hydrate();
 })();
